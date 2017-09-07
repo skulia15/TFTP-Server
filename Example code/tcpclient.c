@@ -1,6 +1,6 @@
-/* A UDP echo client.
+/* A TCP echo client.
  *
- * Read a string from the console, send it by UDP to localhost:32000,
+ * Read a string from the console, send it by TCP to localhost:32000,
  * receive the reply and print it.
  *
  * Copyright (c) 2016, Marcel Kyas
@@ -32,6 +32,7 @@
  */
 
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -42,40 +43,43 @@
 
 int main()
 {
-    int port = 69;
     int sockfd;
     char *message = NULL;
     size_t msg_size;
     struct sockaddr_in server;
 
-    // Create a UDP socket
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-    // Choose an address to connect to.
+    // Create a TCP socket and connect to server.
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
     memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
     inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
     server.sin_port = htons(32000);
+    int r = connect(sockfd, (struct sockaddr *) &server, sizeof(server));
+    if (r == -1) {
+        perror("connect");
+        exit(EXIT_FAILURE);
+    }
 
     // Get a line of input from the user.
     fprintf(stdout, "Type message: ");
     fflush(stdout);
     size_t msg_len = getline(&message, &msg_size, stdin);
 
-    // Send to server without the newline.
-    sendto(sockfd, message, msg_len - 1, 0, (struct sockaddr *) &server, sizeof(server));
+    // do not send the newline.
+    send(sockfd, message, msg_len - 1, 0);
 
-    // Receive reply. recvfrom changes len.
-    socklen_t len = (socklen_t) sizeof(server);
-    ssize_t n = recvfrom(sockfd, message, msg_len - 1, 0, (struct sockaddr *) &server, &len);
+    // Receive reply.
+    ssize_t n = recv(sockfd, message, msg_len - 1, 0);
 
-    // NUL-terminate the message, otherwise fprintf may access memory
-    // outside of the string.
+    // Zero terminate the message, otherwise fprintf may access
+    // memory outside of the string.
     message[n] = '\0';
     fprintf(stdout, "Received:\n%s\n", message);
     fflush(stdout);
 
-    close(sockfd); // Once we do not need the socket, dispose of it.
+    // Shutdown connection.
+    shutdown(sockfd, SHUT_RDWR);
+    close(sockfd);
     free(message);
     exit(EXIT_SUCCESS);
 }

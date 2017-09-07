@@ -1,7 +1,7 @@
-/* A UDP echo client.
+/* A TCP echo server.
  *
- * Read a string from the console, send it by UDP to localhost:32000,
- * receive the reply and print it.
+ * Receive a message on port 32000, turn it into upper case and return
+ * it to the sender.
  *
  * Copyright (c) 2016, Marcel Kyas
  * All rights reserved.
@@ -34,48 +34,52 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
+#include <ctype.h>
 #include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
+#include <stdio.h>
 
 int main()
 {
-    int port = 69;
     int sockfd;
-    char *message = NULL;
-    size_t msg_size;
-    struct sockaddr_in server;
+    struct sockaddr_in server, client;
+    char message[512];
 
-    // Create a UDP socket
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    // Create and bind a TCP socket.
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
-    // Choose an address to connect to.
+    // Network functions need arguments in network byte order instead of
+    // host byte order. The macros htonl, htons convert the values.
     memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+    server.sin_addr.s_addr = htonl(INADDR_ANY);
     server.sin_port = htons(32000);
+    bind(sockfd, (struct sockaddr *) &server, (socklen_t) sizeof(server));
 
-    // Get a line of input from the user.
-    fprintf(stdout, "Type message: ");
-    fflush(stdout);
-    size_t msg_len = getline(&message, &msg_size, stdin);
+    // Before the server can accept messages, it has to listen to the
+    // welcome port. A backlog of one connection is allowed.
+    listen(sockfd, 1);
 
-    // Send to server without the newline.
-    sendto(sockfd, message, msg_len - 1, 0, (struct sockaddr *) &server, sizeof(server));
+    for (;;) {
+        // We first have to accept a TCP connection, connfd is a fresh
+        // handle dedicated to this connection.
+        socklen_t len = (socklen_t) sizeof(client);
+        int connfd = accept(sockfd, (struct sockaddr *) &client, &len);
 
-    // Receive reply. recvfrom changes len.
-    socklen_t len = (socklen_t) sizeof(server);
-    ssize_t n = recvfrom(sockfd, message, msg_len - 1, 0, (struct sockaddr *) &server, &len);
+        // Receive from connfd, not sockfd.
+        ssize_t n = recv(connfd, message, sizeof(message) - 1, 0);
 
-    // NUL-terminate the message, otherwise fprintf may access memory
-    // outside of the string.
-    message[n] = '\0';
-    fprintf(stdout, "Received:\n%s\n", message);
-    fflush(stdout);
+        message[n] = '\0';
+        fprintf(stdout, "Received:\n%s\n", message);
 
-    close(sockfd); // Once we do not need the socket, dispose of it.
-    free(message);
-    exit(EXIT_SUCCESS);
+        // Convert message to upper case.
+        for (int i = 0; i < n; ++i) message[i] = toupper(message[i]);
+
+        // Send the message back.
+        send(connfd, message, (size_t) n, 0);
+
+        // Close the connection.
+        shutdown(connfd, SHUT_RDWR);
+        close(connfd);
+    }
 }

@@ -42,7 +42,6 @@
 
 int main()
 {
-    int port = 69;
     int sockfd;
     char *message = NULL;
     size_t msg_size;

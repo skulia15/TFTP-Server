@@ -1,7 +1,7 @@
-/* A UDP echo client.
+/* A UDP echo server.
  *
- * Read a string from the console, send it by UDP to localhost:32000,
- * receive the reply and print it.
+ * Receive a message on port 32000, turn it into upper case and return
+ * it to the sender. Use setsockopt for timeout.
  *
  * Copyright (c) 2016, Marcel Kyas
  * All rights reserved.
@@ -31,51 +31,59 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
 
 int main()
 {
-    int port = 69;
     int sockfd;
-    char *message = NULL;
-    size_t msg_size;
-    struct sockaddr_in server;
+    struct sockaddr_in server, client;
+    char message[512];
 
-    // Create a UDP socket
+    // Create and bind a UDP socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    // Choose an address to connect to.
+    // Receives should timeout after 30 seconds.
+    struct timeval timeout;
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    // Network functions need arguments in network byte order instead
+    // of host byte order. The macros htonl, htons convert the
+    // values.
     memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+    server.sin_addr.s_addr = htonl(INADDR_ANY);
     server.sin_port = htons(32000);
+    bind(sockfd, (struct sockaddr *) &server, (socklen_t) sizeof(server));
 
-    // Get a line of input from the user.
-    fprintf(stdout, "Type message: ");
-    fflush(stdout);
-    size_t msg_len = getline(&message, &msg_size, stdin);
+    for (;;) {
+        // Receive up to one byte less than declared, because it will
+        // be NUL-terminated later.
+        socklen_t len = (socklen_t) sizeof(client);
+        ssize_t n = recvfrom(sockfd, message, sizeof(message) - 1,
+                             0, (struct sockaddr *) &client, &len);
+        if (n >= 0) {
+            message[n] = '\0';
+            fprintf(stdout, "Received:\n%s\n", message);
+            fflush(stdout);
 
-    // Send to server without the newline.
-    sendto(sockfd, message, msg_len - 1, 0, (struct sockaddr *) &server, sizeof(server));
+            // convert message to upper case.
+            for (int i = 0; i < n; ++i) {
+                message[i] = toupper(message[i]);
+            }
 
-    // Receive reply. recvfrom changes len.
-    socklen_t len = (socklen_t) sizeof(server);
-    ssize_t n = recvfrom(sockfd, message, msg_len - 1, 0, (struct sockaddr *) &server, &len);
-
-    // NUL-terminate the message, otherwise fprintf may access memory
-    // outside of the string.
-    message[n] = '\0';
-    fprintf(stdout, "Received:\n%s\n", message);
-    fflush(stdout);
-
-    close(sockfd); // Once we do not need the socket, dispose of it.
-    free(message);
-    exit(EXIT_SUCCESS);
+            sendto(sockfd, message, (size_t) n, 0,
+                   (struct sockaddr *) &client, len);
+        } else {
+            // Error or timeout. Check errno == EAGAIN or
+            // errno == EWOULDBLOCK to check whether a timeout happened
+        }
+    }
 }
