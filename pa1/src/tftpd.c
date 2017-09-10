@@ -9,8 +9,6 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 
-/* your code goes here. */
-
 // Operation codes
 #define RRQ 1
 #define WRQ 2
@@ -40,7 +38,6 @@ unsigned short blockNo;
 int sockfd;
 struct sockaddr_in server, client;
 int isLastPacket;
-char *mode;
 char dataPacket[PACKET_SIZE];
 
 void closeFpIfOpen();
@@ -51,9 +48,7 @@ void sendDataPacket();
 int handleRRQ(char * message, char * directory);
 int handleACK(char * message, int n);
 char * getMode(char * message, char * requestFile);
-
-/*TODO: RETRANSMIT ON TIMEOUT*/
-/*Downloading files outside of this directory must not be allowed.*/
+int validFilename(char *requestFile);
 
 // Fetches the mode from the given message
 // Mode is found in the header, after the 2 opcode bytes, the filename and the null byte
@@ -99,6 +94,19 @@ void sendError(int errCode, char * errorMessage){
     }
 }
 
+// Checks whether the string contains a "." character. 
+// That is not allowed in a filename, since it would allow you to access directories outside of the allowed ones
+int validFilename(char *requestFile){
+    char *c = requestFile;
+    while(*c){
+        if(strchr(".", *c)){
+            return 0;
+        }
+        c++;
+    }
+    return 1;
+}
+
 // Constructs a data packet by setting the opcode and the block number,
 // reading data from the file to the buffer and then reading data from
 // the buffer into the data packet and lastly sending the data packet to the client
@@ -107,19 +115,7 @@ void sendDataPacket(){
     char dataBuffer[DATA_BLOCK_SIZE];
 
     // n is number of bytes read. Read 512B to the data buffer
-    int n = 0;
-
-    // Check which mode we got and read data depending on the mode
-    if(strcmp(mode, "octet") == 0){
-        n = fread(dataBuffer, 1, DATA_BLOCK_SIZE, fp);
-    }
-    else if(strcmp(mode, "netascii") == 0){
-        n = fread(dataBuffer, sizeof(char), sizeof(dataBuffer)/sizeof(char), fp);
-    }
-    else{
-        sendError(ILLEGAL_OPERATION, "This mode is not supported \n");
-        return;
-    }
+    int n = fread(dataBuffer, 1, DATA_BLOCK_SIZE, fp);
     
     // If we successfully read some data from the file
     if(n >= 0){
@@ -152,13 +148,21 @@ void sendDataPacket(){
     }
 }
 
+// Gets the name of the file requested from the message. Then constructs a full path by concatenating available directory and the requested file
+// then the mode is fetched by calling getMode. The file is then opened and the 
 int handleRRQ(char * message, char * directory){
     blockNo = 1;
-    // The isLastPacket packet is not yet received
+    // The last packet is not yet received
     isLastPacket = 0;
     
     // Get the name of the requested file.
     char *requestFile = message + OPCODE_SIZE;
+
+    // Check if the client is trying to access a file outside of the allowed directory
+    if(!validFilename(requestFile)){
+        sendError(3, "Illegal filename");
+        return -1;
+    }
 
     // Construct the full path
     char path[PATH_MAX];
@@ -167,15 +171,31 @@ int handleRRQ(char * message, char * directory){
     strcat(path, requestFile);
 
     // Find out the mode requested
-    mode = getMode(message, requestFile);
+    char *mode = getMode(message, requestFile);
 
-    fprintf(stdout, "file \"%s\" requested from ", requestFile);
+    fprintf(stdout, "file \"%s\" requested \n", requestFile);
     //fprintf(stdout, "IP %s \n", inet_ntoa(server.sin_addr));
     //fprintf(stdout, "Port %s \n", server.sin_port);
     //file "example_data1" requested from 127.0.0.1:37242
 
     // Open the file
-    fp = fopen(path, "rb");
+    if(strcmp(mode, "netascii") == 0){
+        // For opening text files we use r because different operating systems
+        // have different ways of storing text and this does the correct
+        // translation so we dont need to think about that.
+        fp = fopen(path, "r");
+    }
+    else if(strcmp(mode, "octet") == 0){
+        // This opens the file exactly as is and doesn't do any translations 
+        // because we need the file to be the exact copy of the original.
+        fp = fopen(path, "rb");
+    }
+    else{
+        sendError(ILLEGAL_OPERATION, "This mode is not supported \n");
+        return -1;
+    }
+
+    
     if(fp == NULL){
         sendError(FILE_NOT_FOUND, "Failed to open the given file");
         return -1;
@@ -184,9 +204,13 @@ int handleRRQ(char * message, char * directory){
     return 1;
 }
 
+// Checks if the last packet has been received.
+// Then checks if the block number of the acknowledgement packet
+// is the same as in the block number of the most recently sent data packet
+// if it is the same the next data packet is sent, if it is one less then we
+// resend the previous data packet, else an error is thrown.
 int handleACK(char * message, int n){
     if(isLastPacket){
-        fprintf(stdout, "Transmission received\n");
         return 1;
     }
 
@@ -288,6 +312,5 @@ int main(int argc, char *argv[]){
 		fprintf(stdout, "Closing the socket failed\n");
 		return -1;
 	}
-    fprintf(stdout, "END OF PROGRAM\n");
 	return 0;
 }
