@@ -6,9 +6,11 @@
 ## Overview:
 A trivial file transfer protocol server that allows read requests for files inside a given data folder and sends them to the client.
 
-Compile with:  make -C ./src
-To run the server use: ./src/tftpd PORT_NUMBER DATA_FOLDER
-Request data from server with: tftp 127.0.0.1 PORT_NUMBER (-m octet) -c get FILE_NAME
+Compile with:  `make -C ./src`
+
+To run the server use: `./src/tftpd PORT_NUMBER DATA_FOLDER`
+
+Request data from server with: `tftp 127.0.0.1 PORT_NUMBER (-m octet) -c get FILE_NAME`
 
 ## Description of Functions:
 
