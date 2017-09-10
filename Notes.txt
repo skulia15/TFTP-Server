@@ -38,4 +38,7 @@ netascii terminated by a zero byte. The mode field contains the
 string "netascii", "octet", or "mail" 
 -A host which receives netascii mode data must translate the data to its own format.
 
-Test server with client: tftp 127.0.0.1 myport -c get example_data1
+Test server with client: tftp 127.0.0.1 22477 -c get example_data1
+ /labs/tsam15/my_port
+ make -C ./src
+ chmod +x tftpd
