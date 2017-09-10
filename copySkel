@@ -1,4 +1,0 @@
-#!/bin/bash
-#Script to upload to skel.ru.is
-#insert the script into the same folder that you want to cope, in this case it is /tsam_1
-sshpass -p 'Jokull128' scp -r ../tsam_1 'skulia15'@skel.ru.is:/home/hir.is/'skulia15'
